@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Juego: Ecos de la Guerra (Reglas de Combate)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto Mono', monospace;
+            overflow: hidden;
+            background-color: #1a202c;
+            color: #a0aec0;
+        }
+        #game-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        canvas {
+            background-image: url('https://images.unsplash.com/photo-1568682339842-63234b3c959d?q=80&w=2070&auto=format&fit=crop');
+            background-size: cover;
+            background-position: center;
+            border-radius: 0.5rem;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8), inset 0 0 40px rgba(0,0,0,0.5);
+            cursor: none;
+            border: 3px solid #4a5568;
+            transition: box-shadow 0.1s ease-in-out;
+        }
+        .damage-flash {
+            box-shadow: 0 0 40px rgba(255,0,0,0.9), inset 0 0 50px rgba(255,0,0,0.6) !important;
+        }
+        .modal-content, #start-screen {
+            animation: slide-in 0.5s ease-out;
+        }
+        @keyframes slide-in {
+            from {
+                transform: translateY(-50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        #start-screen button, #close-modal-btn {
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            transition: all 0.2s ease-in-out;
+        }
+        #start-screen button:hover, #close-modal-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 8px rgba(0,0,0,0.4);
+        }
+        #start-screen button:disabled {
+            background-color: #a0aec0;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300">
+
+    <div id="game-container">
+        <div class="w-full max-w-4xl px-4 mb-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-yellow-400">Ecos de la Guerra</h1>
+            <div>
+                <span class="text-lg">Blindaje: <span id="score" class="font-bold text-white">10</span></span>
+            </div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <!-- Pantalla de Inicio -->
+    <div id="start-screen" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4">
+        <div class="text-center bg-gray-800 p-10 rounded-lg shadow-xl border-2 border-yellow-400">
+            <h2 class="text-4xl font-bold mb-4 text-white">MISIÓN AÉREA</h2>
+            <p class="text-lg text-gray-300 mb-8">Derriba aviones enemigos y descubre las consecuencias de la guerra.</p>
+            <button id="start-btn" class="bg-green-500 text-white font-bold py-3 px-8 rounded-lg text-xl hover:bg-green-600">Iniciar Misión</button>
+        </div>
+    </div>
+
+    <!-- Modal para mensajes de consecuencias -->
+    <div id="message-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4">
+        <div class="modal-content bg-gray-800 p-8 rounded-lg shadow-xl max-w-2xl w-full border-2 border-yellow-400">
+            <h2 class="text-2xl font-bold mb-4 text-yellow-500">Avión Enemigo Derribado</h2>
+            <p id="consequence-message" class="text-lg text-gray-200 mb-6"></p>
+            <button id="close-modal-btn" class="w-full bg-yellow-500 text-gray-900 font-bold py-2 px-4 rounded hover:bg-yellow-600">Continuar Misión</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        
+        const messageModal = document.getElementById('message-modal');
+        const consequenceMessageEl = document.getElementById('consequence-message');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+
+        let isGamePaused = true;
+        
+        const setCanvasSize = () => {
+            const container = document.getElementById('game-container');
+            const maxWidth = 1024;
+            const containerWidth = container.clientWidth * 0.95;
+            const containerHeight = container.clientHeight * 0.8;
+            canvas.width = Math.min(containerWidth, maxWidth);
+            canvas.height = Math.min(containerHeight, canvas.width * 0.6);
+        };
+        
+        window.addEventListener('resize', setCanvasSize);
+        setCanvasSize();
+
+        // --- Base de datos de consecuencias ---
+        const consequences = [
+            "Se estima que murieron entre 40 y 60 millones de personas, la mitad de ellas civiles.", "Solo en Europa, la guerra causó la muerte de 39 millones de personas.", "El Holocausto implicó el asesinato sistemático de seis millones de judíos por el régimen nazi.", "Millones de personas fueron despojadas de sus bienes y forzadas a abandonar sus hogares.", "Los supervivientes de la guerra presentaron un mayor riesgo de sufrir diabetes, depresión y problemas coronarios a largo plazo.", "La alta mortalidad masculina resultó en que muchas mujeres no se casaran y muchos niños crecieran sin la figura paterna.", "Hubo una incorporación masiva de mujeres a la fuerza laboral, lo que transformó la estructura social.", "Las economías de los países involucrados quedaron al borde de la bancarrota, con devaluación de monedas e inflación.", "Estados Unidos emergió como la principal potencia económica mundial, produciendo más de la mitad de los bienes del planeta en 1945.", "Se crearon el Banco Mundial y el Fondo Monetario Internacional (FMI) para reconstruir Europa y estabilizar la economía.", "Se implementó el Plan Marshall, un programa de ayuda económica de EE. UU. para la reconstrucción de Europa Occidental.", "Alemania fue dividida en la República Federal Alemana (occidental) y la República Democrática Alemana (oriental), quedando partida por casi 50 años.", "El debilitamiento de las potencias europeas impulsó los procesos de descolonización en Asia y África.", "Se fundó la Organización de las Naciones Unidas (ONU) para fomentar la cooperación internacional y prevenir futuros conflictos.", "La guerra impulsó el desarrollo de tecnologías como los aviones a reacción, los radares y la energía nuclear."
+        ];
+
+        // --- Música con Tone.js ---
+        const musicSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sawtooth" } }).toDestination();
+        const bassSynth = new Tone.MonoSynth({ oscillator: { type: "fmsquare" }, envelope: { attack: 0.01, release: 0.4 } }).toDestination();
+        const winSound = new Tone.Synth({ oscillator: { type: 'triangle' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 1 } }).toDestination();
+        const damageSound = new Tone.Synth({ oscillator: { type: 'square' }, envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.1 } }).toDestination();
+        
+        const melody = new Tone.Sequence((time, note) => { musicSynth.triggerAttackRelease(note, "8n", time); }, [ 'G4', 'A4', 'C5', ['D5', 'G4'], 'F4', 'G4', 'A4', ['C5', 'F4'] ], "4n");
+        const bassline = new Tone.Sequence((time, note) => { bassSynth.triggerAttackRelease(note, "4n", time); }, ['C3', 'F3', 'G3', 'C3'], "1m");
+        
+        Tone.Transport.bpm.value = 110;
+        
+        // --- Carga de imágenes SVG ---
+        const playerSVG = `<svg width="80" height="80" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><g transform="translate(0 -10)"><defs><linearGradient id="playerBodyGrad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#78909c;stop-opacity:1" /><stop offset="100%" style="stop-color:#546e7a;stop-opacity:1" /></linearGradient><linearGradient id="playerWingGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" style="stop-color:#b0bec5;stop-opacity:1" /><stop offset="100%" style="stop-color:#90a4ae;stop-opacity:1" /></linearGradient></defs><path d="M100 10 L125 80 L100 70 L75 80 Z" fill="url(#playerBodyGrad)"/><path d="M100 70 L125 80 L120 180 L80 180 L75 80 Z" fill="url(#playerBodyGrad)"/><path d="M100 170 L110 180 L90 180 Z" fill="#455a64" /><path d="M100 85 L190 105 L170 125 L100 95 Z" fill="url(#playerWingGrad)"/><path d="M100 85 L10 105 L30 125 L100 95 Z" fill="url(#playerWingGrad)"/><polygon points="160,110 165,120 175,120 167,125 170,135 160,130 150,135 153,125 145,120 155,120" fill="white"/><polygon points="40,110 45,120 55,120 47,125 50,135 40,130 30,135 33,125 25,120 35,120" fill="white"/><path d="M100 60 C110 60, 115 75, 100 75 C85 75, 90 60, 100 60 Z" fill="#81d4fa" stroke="#37474f" stroke-width="2"/><circle cx="100" cy="10" r="10" fill="#37474f"/><path d="M100 10 L140 0 L130 10 L140 20 Z" fill="#cfd8dc"/><path d="M100 10 L60 0 L70 10 L60 20 Z" fill="#cfd8dc"/></g></svg>`;
+        const enemySVG = `<svg width="80" height="80" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg"><g transform="rotate(180 100 100) translate(0 -10)"><defs><linearGradient id="enemyBodyGrad" x1="0%" y1="0%" x2="0%" y2="100%"><stop offset="0%" style="stop-color:#424242;stop-opacity:1" /><stop offset="100%" style="stop-color:#212121;stop-opacity:1" /></linearGradient></defs><path d="M100 15 L120 85 L100 75 L80 85 Z" fill="url(#enemyBodyGrad)"/><path d="M100 75 L120 85 L115 185 L85 185 L80 85 Z" fill="url(#enemyBodyGrad)"/><path d="M100 90 L195 95 L175 110 L100 100 Z" fill="#424242"/><path d="M100 90 L5 95 L25 110 L100 100 Z" fill="#424242"/><rect x="150" y="100" width="15" height="4" transform="rotate(45 157.5 102)" fill="#c62828"/><rect x="150" y="100" width="15" height="4" transform="rotate(-45 157.5 102)" fill="#c62828"/><rect x="35" y="100" width="15" height="4" transform="rotate(45 42.5 102)" fill="#c62828"/><rect x="35" y="100" width="15" height="4" transform="rotate(-45 42.5 102)" fill="#c62828"/><path d="M100 70 L110 80 L90 80 Z" fill="#ffca28" stroke="#212121" stroke-width="2"/><circle cx="100" cy="15" r="8" fill="#d32f2f"/></g></svg>`;
+        const parachuteSVG = `<svg width="40" height="40" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M95,50 A45,25 0 0,0 5,50 Z" fill="rgba(247, 250, 252, 0.8)" stroke="#f7fafc" stroke-width="4"/><path d="M10,50 L50,80 M90,50 L50,80 M50,50 L50,80" stroke="#f7fafc" stroke-width="2"/><circle cx="50" cy="85" r="5" fill="#f7fafc"/></svg>`;
+
+        const playerImage = new Image();
+        const enemyImage = new Image();
+        const parachuteImage = new Image();
+
+        class Player {
+            constructor() { this.width = 80; this.height = 80; this.x = canvas.width / 2 - this.width / 2; this.y = canvas.height - this.height - 20; this.speed = 8; this.dx = 0; }
+            draw() { ctx.drawImage(playerImage, this.x, this.y, this.width, this.height); }
+            update() { this.x += this.dx; if (this.x < 0) this.x = 0; if (this.x + this.width > canvas.width) this.x = canvas.width - this.width; this.draw(); }
+            move(direction) { this.dx = direction === 'right' ? this.speed : -this.speed; }
+            stop() { this.dx = 0; }
+        }
+
+        class Projectile {
+            constructor(x, y) { this.x = x; this.y = y; this.width = 6; this.height = 20; this.speed = 12; this.color = '#FBBF24'; }
+            draw() { ctx.fillStyle = this.color; ctx.shadowColor = '#FBBF24'; ctx.shadowBlur = 10; ctx.fillRect(this.x, this.y, this.width, this.height); ctx.shadowBlur = 0; }
+            update() { this.y -= this.speed; this.draw(); }
+        }
+
+        class Enemy {
+            constructor() { this.width = 80; this.height = 80; this.x = Math.random() * (canvas.width - this.width); this.y = -this.height; this.speed = Math.random() * 2 + 2; }
+            draw() { ctx.drawImage(enemyImage, this.x, this.y, this.width, this.height); }
+            update() { this.y += this.speed; this.draw(); }
+        }
+        
+        class Paratrooper {
+            constructor(x, y) { this.x = x; this.y = y; this.width = 40; this.height = 40; this.speed = 0.8; }
+            draw() { ctx.drawImage(parachuteImage, this.x, this.y, this.width, this.height); }
+            update() { this.y += this.speed; this.draw(); }
+        }
+
+        class Particle {
+            constructor(x, y) { this.x = x; this.y = y; this.size = Math.random() * 7 + 2; this.speedX = Math.random() * 4 - 2; this.speedY = Math.random() * 4 - 2; this.color = `hsl(${Math.random() * 50 + 5}, 100%, ${Math.random() * 40 + 50}%)`; this.life = 80; }
+            draw() { ctx.fillStyle = this.color; ctx.globalAlpha = this.life / 80; ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
+            update() { this.x += this.speedX; this.y += this.speedY; this.life--; this.draw(); }
+        }
+
+        let player = new Player();
+        let projectiles = []; let enemies = []; let paratroopers = []; let particles = [];
+        let score = 10;
+        let enemySpawnInterval = 1800; let lastEnemySpawn = 0;
+
+        function handleInput(e) {
+            if (isGamePaused) return;
+            if (e.key === 'ArrowRight' || e.key === 'd') player.move('right');
+            else if (e.key === 'ArrowLeft' || e.key === 'a') player.move('left');
+            else if (e.code === 'Space') projectiles.push(new Projectile(player.x + player.width / 2 - 3, player.y));
+        }
+        function stopMoving(e) { if (e.key.includes('Arrow')) player.stop(); }
+        document.addEventListener('keydown', handleInput);
+        document.addEventListener('keyup', stopMoving);
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 30; i++) { particles.push(new Particle(x, y)); }
+        }
+
+        function showConsequence() {
+            isGamePaused = true;
+            const randomIndex = Math.floor(Math.random() * consequences.length);
+            consequenceMessageEl.textContent = consequences[randomIndex];
+            messageModal.classList.remove('hidden');
+        }
+
+        closeModalBtn.addEventListener('click', () => {
+            messageModal.classList.add('hidden');
+            if (score < 18) {
+                isGamePaused = false;
+                requestAnimationFrame(gameLoop);
+            }
+        });
+
+        startBtn.addEventListener('click', async () => {
+            await Tone.start();
+            Tone.Transport.start();
+            melody.start(0);
+            bassline.start(0);
+            startScreen.classList.add('hidden');
+            resetGame();
+            isGamePaused = false;
+            requestAnimationFrame(gameLoop);
+        });
+
+        function gameLoop(timestamp) {
+            if (isGamePaused) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            player.update();
+            
+            projectiles = projectiles.filter(p => p.y + p.height > 0);
+            projectiles.forEach(p => p.update());
+            
+            if (timestamp - lastEnemySpawn > enemySpawnInterval) {
+                enemies.push(new Enemy());
+                lastEnemySpawn = timestamp;
+                if (enemySpawnInterval > 500) enemySpawnInterval -= 20;
+            }
+            
+            enemies = enemies.filter(e => e.y < canvas.height);
+            paratroopers = paratroopers.filter(p => p.y < canvas.height);
+            particles = particles.filter(p => p.life > 0);
+
+            paratroopers.forEach(p => p.update());
+            
+            enemies.forEach((enemy, enemyIndex) => {
+                enemy.update();
+                projectiles.forEach((projectile, projectileIndex) => {
+                    if (projectile.x < enemy.x + enemy.width && projectile.x + projectile.width > enemy.x && projectile.y < enemy.y + enemy.height && projectile.y + projectile.height > enemy.y) {
+                        setTimeout(() => {
+                           createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+                           paratroopers.push(new Paratrooper(enemy.x, enemy.y));
+                           enemies.splice(enemyIndex, 1);
+                           projectiles.splice(projectileIndex, 1);
+                           score++;
+                           scoreEl.textContent = score;
+                           if (score >= 18) {
+                               gameWon();
+                           } else {
+                               showConsequence();
+                           }
+                        }, 0);
+                    }
+                });
+
+                if (player.x < enemy.x + enemy.width && player.x + player.width > enemy.x && player.y < enemy.y + enemy.height && player.y + player.height > enemy.y) {
+                    createExplosion(enemy.x + enemy.width / 2, enemy.y + enemy.height / 2);
+                    enemies.splice(enemyIndex, 1);
+                    score--;
+                    scoreEl.textContent = score;
+                    damageSound.triggerAttackRelease("C2", "8n");
+                    canvas.classList.add('damage-flash');
+                    setTimeout(() => canvas.classList.remove('damage-flash'), 100);
+                    if (score <= 0) {
+                        gameOver();
+                    }
+                }
+            });
+            particles.forEach(p => p.update());
+            requestAnimationFrame(gameLoop);
+        }
+        
+        function stopGame() {
+            isGamePaused = true;
+            Tone.Transport.stop();
+            melody.stop();
+            bassline.stop();
+        }
+
+        function gameWon() {
+            stopGame();
+            winSound.triggerAttackRelease("C5", "0.5s", Tone.now());
+            winSound.triggerAttackRelease("E5", "0.5s", Tone.now() + 0.2);
+            winSound.triggerAttackRelease("G5", "0.5s", Tone.now() + 0.4);
+            winSound.triggerAttackRelease("C6", "1s", Tone.now() + 0.6);
+
+            setTimeout(() => {
+                ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'black';
+                ctx.font = '50px Roboto Mono';
+                ctx.textAlign = 'center';
+                ctx.fillText('¡CONGRATULATIONS!', canvas.width / 2, canvas.height / 2);
+                ctx.font = '20px Roboto Mono';
+                ctx.fillText('¡Has completado la misión!', canvas.width / 2, canvas.height / 2 + 40);
+                setTimeout(() => startScreen.classList.remove('hidden'), 4000);
+            }, 100);
+        }
+
+        function gameOver() {
+            stopGame();
+            setTimeout(() => {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'white';
+                ctx.font = '40px Roboto Mono';
+                ctx.textAlign = 'center';
+                ctx.fillText('MISIÓN FALLIDA', canvas.width / 2, canvas.height / 2 - 40);
+                ctx.font = '20px Roboto Mono';
+                ctx.fillText('Tu blindaje ha llegado a 0', canvas.width / 2, canvas.height / 2);
+                setTimeout(() => startScreen.classList.remove('hidden'), 4000);
+            }, 100);
+        }
+        
+        function resetGame() {
+            player = new Player();
+            projectiles = []; enemies = []; paratroopers = []; particles = [];
+            score = 10;
+            scoreEl.textContent = score;
+            enemySpawnInterval = 1800;
+        }
+
+        const images = [
+            { img: playerImage, src: "data:image/svg+xml;base64," + btoa(playerSVG) },
+            { img: enemyImage, src: "data:image/svg+xml;base64," + btoa(enemySVG) },
+            { img: parachuteImage, src: "data:image/svg+xml;base64," + btoa(parachuteSVG) },
+        ];
+
+        let assetsLoaded = 0;
+        const totalAssets = images.length;
+        startBtn.textContent = 'Cargando Recursos...';
+        startBtn.disabled = true;
+
+        images.forEach(asset => {
+            asset.img.src = asset.src;
+            asset.img.onload = () => {
+                assetsLoaded++;
+                if (assetsLoaded === totalAssets) {
+                    startBtn.textContent = 'Iniciar Misión';
+                    startBtn.disabled = false;
+                }
+            };
+            asset.img.onerror = () => {
+                console.error("Error cargando la imagen:", asset.src);
+                startScreen.innerHTML = `<p class="text-red-500">Error al cargar los recursos del juego. Intenta recargar la página.</p>`;
+            };
+        });
+    </script>
+</body>
+</html>
